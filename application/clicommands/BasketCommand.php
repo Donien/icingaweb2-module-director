@@ -102,6 +102,149 @@ class BasketCommand extends Command
         echo "Objects from Basket Snapshot have been restored\n";
     }
 
+    /**
+     * Upload a Basket snapshot from JSON dump provided on STDIN
+     *
+     * USAGE
+     *
+     * icingacli director basket upload --name <basket> < basket-dump.json
+     *
+     * OPTIONS
+     */
+    public function uploadAction()
+    {
+        $basketName = $this->params->getRequired('name');
+        $json = file_get_contents('php://stdin');
+        /**
+         * Removing trailing whitespaces / EOL to keep consistent SHA1 checksums.
+         * When downloading a Basket in the UI, it has no EOL.
+         * Actions like writing its content to another file manually adds an EOL
+         * and so has the SHA1 checksum change.
+         * Thus it currently needs to be stripped here.
+         *
+         * Also, when creating a new Basket from JSON ('BasketSnapshot::restoreJson')
+         * the UUID is currently not taken into account. The basket is created with
+         * the correct name but will use a newly generated UUID.
+         * Thus it's currently not feasible to compare checksums to determine whether
+         * to upload the provided JSON as a new snapshot.
+         * -> Falling back to 'upload regardless'.
+         */
+        $json = rtrim($json);
+        /**
+         * CHECKSUM RELATED
+         * This code block can be used once Basket UUIDs are used to
+         * restore Baskets from JSON
+         *
+         * Change
+         *  '$needsSnapshot = true;'
+         * to
+         *  '$needsSnapshot = false;'
+         */
+        $needsSnapshot = true;
+        /**
+         * CHECKSUM RELATED
+         * This code block can be used once Basket UUIDs are used to
+         * restore Baskets from JSON
+         *
+         * $checksum = sha1($json, false);
+         */
+        $db = $this->db()->getDbAdapter();
+        $query = $db->select()
+            ->from('director_basket', 'basket_name')
+            ->where('basket_name = ?', $this->params->getRequired('name'))
+            ->order('basket_name');
+        $rows = $db->fetchCol($query);
+        // Create Basket if needed
+        if (empty($rows)) {
+            $needsSnapshot = true;
+            $jsonObj = Json::decode($json);
+            $existingBasket = $jsonObj->Basket->$basketName->basket_name ?? false;
+            if ($existingBasket) {
+                $newBasket = Json::encode(array(
+                    'Basket' => array(
+                        $basketName => $jsonObj->Basket->$basketName
+                    )
+                ));
+            } else {
+                $newBasket = Json::encode(array(
+                    "Basket" => array(
+                        $basketName => array(
+                            "basket_name" => $basketName,
+                            "owner_type" => "user",
+                            "owner_value" => "basket",
+                            "objects" => array(
+                                "Command" => true,
+                                "ExternalCommand" => true,
+                                "CommandTemplate" => true,
+                                "HostGroup" => true,
+                                "IcingaTemplateChoiceHost" => true,
+                                "HostTemplate" => true,
+                                "ServiceGroup" => true,
+                                "IcingaTemplateChoiceService" => true,
+                                "ServiceTemplate" => true,
+                                "ServiceSet" => true,
+                                "UserGroup" => true,
+                                "UserTemplate" => true,
+                                "User" => true,
+                                "NotificationTemplate" => true,
+                                "Notification" => true,
+                                "TimePeriod" => true,
+                                "Dependency" => true,
+                                "DataList" => true,
+                                "ImportSource" => true,
+                                "SyncRule" => true,
+                                "DirectorJob" => true,
+                                "Basket" => true
+                            )
+                        )
+                    )
+                ));
+            }
+            BasketSnapshot::restoreJson($newBasket, $this->db());
+            echo "Created Basket '" . $basketName . "'.\n";
+        }
+        /**
+         * CHECKSUM RELATED
+         * This code block can be used once Basket UUIDs are used to
+         * restore Baskets from JSON
+         *
+         * else {
+         *     // Abort if checksum is already present
+         *     $query = $db->select()
+         *         ->from('director_basket_snapshot', 'content_checksum')
+         *         ->where('HEX(content_checksum) = ?', $checksum);
+         *     $rows = $db->fetchCol($query);
+         *     if (! empty($rows)) {
+         *         $needsSnapshot = false;
+         *         echo "Basket snapshot with checksum '" . $checksum . "' already exists.\n";
+         *     } else {
+         *         $needsSnapshot = true;
+         *     }
+         * }
+         */
+        if ($needsSnapshot) {
+            $basket = $this->requireBasket();
+            // Check validity of JSON keys
+            foreach (Json::decode($json) as $type => $content) {
+                if ($type !== 'Datafield') {
+                    $basket->addObjects($type, array_keys((array) $content));
+                }
+            }
+            BasketSnapshot::forBasketFromJson(
+                $basket,
+                $json
+            )->store($this->db);
+            /**
+             * CHECKSUM RELATED
+             * This code block can be used once Basket UUIDs are used to
+             * restore Baskets from JSON
+             *
+             * echo "Basket snapshot with checksum '" . $checksum . "' has been uploaded\n";
+             */
+            echo "Basket snapshot has been uploaded\n";
+        }
+    }
+
     protected function purgeObjectTypes($objects, array $types, $force = false)
     {
         $helper = new ObjectPurgeHelper($this->db());
