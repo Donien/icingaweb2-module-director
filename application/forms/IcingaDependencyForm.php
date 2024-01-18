@@ -259,7 +259,7 @@ class IcingaDependencyForm extends DirectorObjectForm
 
         $redundancyGroup = $dependency->get('redundancy_group');
         $this->addElement('text', 'redundancy_group', [
-            'label' => $this->translate('Dependency Redundancy Group'),
+            'label' => $this->translate('Redundancy Group'),
             'description' => $this->translate(
                 'The dependency redundancy group. A name for a group of which'
                 . ' at least one single dependency must be fulfilled for the'
